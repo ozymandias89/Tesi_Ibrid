@@ -63,6 +63,8 @@ public:
 	void set_integer_variable(CEnv env, Prob lp, bool verbose);
 	void solve_integer_problem(CEnv env, Prob lp, bool verbose);
 	void save (CEnv env, Prob lp);
+	void solveGomory(CEnv env, Prob lp);
+	void add_constraint_Gomory(CEnv env, Prob lp, double* gamma, int var, int aggressivity);
 
 // ATTRIBUTES:
 

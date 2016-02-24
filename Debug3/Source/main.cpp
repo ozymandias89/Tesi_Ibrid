@@ -74,7 +74,6 @@ int main(int argc, char const *argv[]) {
 	clock_t t1;
 	t1 = clock();
 
-
 	// --------------------------------------------------
 	// 2. Initialization problem
 	// --------------------------------------------------
@@ -85,22 +84,120 @@ int main(int argc, char const *argv[]) {
 	try {
 
 		ProblemMaster* master = new ProblemMaster(verbose);
-		master -> setupLP(env, lp);
+		master->setupLP(env, lp);
 
 		// tollerance cplex on problem master
 		CPXsetdblparam(env, CPXPARAM_Simplex_Tolerances_Feasibility, 1e-5);
 		CPXsetdblparam(env, CPXPARAM_Simplex_Tolerances_Optimality, 1e-5);
 
-
-		master -> step1 (env, lp);
-
-
+		master->step1(env, lp);
 
 		do {
 
-			master -> solve(env, lp);
+			//GOMORY
+			master->solveGomory(env, lp);
 
-			master -> save(env, lp);
+			cout << "Number of constraints added: "
+							<< CPXgetnumrows(env, lp) - Num_original_constraints << endl;
+
+
+
+			printf("\nGMI cuts: ");
+
+			status = 0;
+			int jj;
+			double f0, fj, coeff;
+			int r, j;
+			double a[Num_original_variables][N];
+			double Aprime[Num_original_variables][num_constraint];
+			double gamma[Num_original_variables][N];
+
+			int var = N;
+			int con = num_constraint;
+
+			for (jj = 0; jj < Num_original_variables; jj++) {
+
+				double fraction = fabs(
+						(master->varVals[jj]) - (round(master->varVals[jj])));
+
+				if (fraction < 10e-6)
+					continue;
+
+				//basic integer non feasible variables
+				//determine the row of the current GMI cut
+				status = CPXbinvacol(env, lp, jj, Aprime[jj]);
+
+				//find the row of basic jj
+
+				for (r = 0; r < num_constraint; r++) {
+					if (fabs(Aprime[jj][r] - 1.0) < 1e-6L) {
+						break;
+					}
+				}
+				//
+				printf(": row %d ", r);
+				f0 = master->varVals[jj] - floor(master->varVals[jj]);
+				status = CPXbinvarow(env, lp, r, a[jj]);
+
+				for (j = 0; j < N; j++) {
+
+					if (j >= Num_original_variables) {
+						if (a[jj][j] >= 0.0) {
+							coeff = a[jj][j] / f0;
+						} else {
+							coeff = -a[jj][j] / (1 - f0);
+						}
+					} else {
+						fj = a[jj][j] - floor(a[jj][j]);
+						if (fj <= f0) {
+							coeff = fj / f0;
+						} else {
+							coeff = (1 - fj) / (1 - f0);
+						}
+					}
+
+					gamma[jj][j] = coeff;
+				}
+
+			}
+
+			printf("\n ******* ADDING CUTS (GMI): *******\n");
+
+			for (jj = 0; jj < Num_original_variables; jj++) {
+
+				double fraction = fabs(
+						(master->varVals[jj]) - (round(master->varVals[jj])));
+
+				if (fraction < 10e-6)
+					continue;
+
+				if (verbose) {
+					cout << endl;
+					cout << "Aprime: ";
+					for (int i = 0; i < con; i++)
+						cout << " " << Aprime[jj][i];
+					cout << endl;
+
+					cout << "a: ";
+					for (int i = 0; i < var; i++) {
+						cout << " " << a[jj][i];
+					}
+					cout << endl;
+
+					cout << "gamma: ";
+					for (int i = 0; i < var; i++) {
+						cout << " " << gamma[jj][i];
+					}
+					cout << endl;
+				}
+
+				master->add_constraint_Gomory(env, lp, gamma[jj], var , aggressivity);
+
+			}
+
+			master->solve(env, lp);
+
+			master->save(env, lp);
 
 			// --------------------------------------------------------------------
 			// 3. if P_1 and P_2 have solution initialization of the second problem
@@ -116,7 +213,6 @@ int main(int argc, char const *argv[]) {
 			// --------------------------------------------------
 			sec_prob->evaluate_rT();
 
-
 			if (verbose) {
 				print_vect_c();
 				cout << "min sol:" << endl << min_sol << endl;
@@ -129,14 +225,13 @@ int main(int argc, char const *argv[]) {
 			// 6. Cycle step 8
 			// --------------------------------------------------
 			bool flag;
-			bool third_infeasiable=false;
-			bool second_infeasible=false;
+			bool third_infeasiable = false;
+			bool second_infeasible = false;
 
 			CPXsetdblparam(env_dual, CPXPARAM_Simplex_Tolerances_Feasibility,
 					1e-5);
 			CPXsetdblparam(env_dual, CPXPARAM_Simplex_Tolerances_Optimality,
 					1e-5);
-
 
 			sec_prob->step8_1(env_dual, lp_dual);
 
@@ -154,7 +249,6 @@ int main(int argc, char const *argv[]) {
 
 				second_infeasible = sec_prob->solve(env_dual, lp_dual);
 
-
 				if (!second_infeasible) {
 
 					// --------------------------------------------------
@@ -171,7 +265,8 @@ int main(int argc, char const *argv[]) {
 
 						third_prob->setup(sec_prob->satisfy_constraint_list);
 
-						third_infeasiable = third_prob->solve(sec_prob->satisfy_constraint_list);
+						third_infeasiable = third_prob->solve(
+								sec_prob->satisfy_constraint_list);
 
 						if (third_prob->constraint_to_add != -1) {
 							sec_prob->add_constraint(env_dual, lp_dual,
@@ -197,7 +292,6 @@ int main(int argc, char const *argv[]) {
 
 			} while (!flag && !(third_infeasiable) && !(second_infeasible));
 
-
 			// --------------------------------------------------
 			// 8. ADD constraint R in the first problem
 			// --------------------------------------------------
@@ -211,7 +305,7 @@ int main(int argc, char const *argv[]) {
 			flag_find = true;
 
 			iter++;
-			cout <<"Number of iteration: " << iter << endl;
+			cout << "Number of iteration: " << iter << endl;
 			clock_t t2;
 			t2 = clock();
 			double elapsed_secs = double(t2 - t1) / CLOCKS_PER_SEC;
@@ -219,13 +313,12 @@ int main(int argc, char const *argv[]) {
 
 		} while (1);
 
-
 	} catch (std::exception& e) {
 
 		std::cout << ">>>EXCEPTION: " << e.what() << std::endl;
 		cout << "Number of constraints added: "
-						<< CPXgetnumrows(env, lp) - Num_original_constraints << endl;
-		cout <<"Number of iteration: " << iter << endl;
+				<< CPXgetnumrows(env, lp) - Num_original_constraints << endl;
+		cout << "Number of iteration: " << iter << endl;
 		CHECKED_CPX_CALL(CPXwriteprob, env, lp, "../data/problem.lp", 0);
 
 		CPXfreeprob(env, &lp);
